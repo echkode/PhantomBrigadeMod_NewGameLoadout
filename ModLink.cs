@@ -9,12 +9,15 @@ using System.Reflection;
 
 using HarmonyLib;
 using PhantomBrigade.Data;
+using PhantomBrigade.Mods;
+
 using UnityEngine;
 
 namespace EchKode.PBMods.NewGameLoadout
 {
 	public class ModLink : PhantomBrigade.Mods.ModLink
 	{
+		internal static int modIndex;
 		internal static string modId;
 		internal static string modPath;
 
@@ -23,6 +26,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			// Uncomment to get a file on the desktop showing the IL of the patched methods and any output from FileLog.Log()
 			//Harmony.DEBUG = true;
 
+			modIndex = ModManager.loadedMods.Count;
 			modId = metadata.id;
 			modPath = metadata.path;
 			var patchAssembly = typeof(ModLink).Assembly;
@@ -40,7 +44,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			Directory
 		}
 
-		private const string saveName = "save_internal_newgame";
+		private const string saveName = "save_internal_quickstart";
 		private static readonly string modConfigOverridesDirectoryName = $"ConfigOverrides/Saves/{saveName}/";
 		private static readonly string modConfigEditsDirectoryName = $"ConfigEdits/Saves/{saveName}/";
 
@@ -69,7 +73,7 @@ namespace EchKode.PBMods.NewGameLoadout
 
 			modConfigOverridesPath = $"{ModLink.modPath}{modConfigOverridesDirectoryName}";
 			modConfigEditsPath = $"{ModLink.modPath}{modConfigEditsDirectoryName}";
-			modConfigFieldEditMethod = AccessTools.DeclaredMethod(typeof(PhantomBrigade.Mods.ModManager), "ProcessFieldEdit");
+			modConfigFieldEditMethod = AccessTools.DeclaredMethod(typeof(ModManager), "ProcessFieldEdit");
 			targets = new List<(TargetType, string, Type, string)>()
 			{
 				(TargetType.File, "core.yaml", typeof(DataContainerSavedCore), "core"),
@@ -77,7 +81,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				(TargetType.File, "world.yaml", typeof(DataContainerSavedWorld), "world"),
 				(TargetType.File, "crawler.yaml", typeof(DataContainerSavedCrawler), "crawler"),
 				(TargetType.Directory, "OverworldProvinces", typeof(DataContainerSavedOverworldProvince), "provinces"),
-				(TargetType.Directory, "OverworldEntities", typeof(DataContainerSavedOverworldEntity), "overWorldEntities"),
+				(TargetType.Directory, "OverworldEntities", typeof(DataContainerSavedOverworldEntity), "overworldEntities"),
 				(TargetType.File, "combat_setup.yaml", typeof(DataContainerSavedCombatSetup), "combatSetup"),
 				(TargetType.File, "combat.yaml", typeof(DataContainerSavedCombat), "combat"),
 				(TargetType.Directory, "Units", typeof(DataContainerSavedUnit), "units"),
@@ -164,16 +168,29 @@ namespace EchKode.PBMods.NewGameLoadout
 		{
 			if (!Directory.Exists(Path.Combine(modConfigOverridesPath, target.FsName)))
 			{
+				Debug.Log($"Mod {ModLink.modIndex} ({ModLink.modId}) LoadDecomposed did not find target directory: {target.FsName}");
 				return;
 			}
 
+			Debug.Log($"Mod {ModLink.modIndex} ({ModLink.modId}) LoadDecomposed on: contentType={target.ContentType}; field={target.FieldName}; fs={target.FsName}");
 			var method = AccessTools.DeclaredMethod(
 				typeof(SaveSerializationHelper),
 				"GetContainers",
 				new[] { typeof(string), typeof(string) },
 				new[] { target.ContentType });
+			if (method == null)
+			{
+				Debug.LogWarning($"Mod {ModLink.modIndex} ({ModLink.modId}) reflection failed: method=GetContainers; targetType={target.ContentType}; instType={inst.GetType().Name};");
+				return;
+			}
+
 			var data = method.Invoke(null, new object[] { modConfigOverridesPath, target.FsName });
 			var field = AccessTools.DeclaredField(inst.GetType(), target.FieldName);
+			if (field == null)
+			{
+				Debug.LogWarning($"Mod {ModLink.modIndex} ({ModLink.modId}) reflection failed: field={target.FieldName}; targetType={target.ContentType}; instType={inst.GetType().Name};");
+				return;
+			}
 			field.SetValue(inst, data);
 		}
 
@@ -240,7 +257,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			ApplyConfigEditSteps(data, $"{target.FsName}+{key}", edits);
 		}
 
-		private static (bool, PhantomBrigade.Mods.ModConfigEdit)
+		private static (bool, ModConfigEdit)
 			LoadConfigEditSteps(string pathname)
 		{
 			if (!File.Exists(pathname))
@@ -248,7 +265,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				return (false, null);
 			}
 
-			var configEditSerialized = UtilitiesYAML.ReadFromFile<PhantomBrigade.Mods.ModConfigEditSerialized>(pathname, false);
+			var configEditSerialized = UtilitiesYAML.ReadFromFile<ModConfigEditSerialized>(pathname, false);
 			if (configEditSerialized == null)
 			{
 				return (false, null);
@@ -259,7 +276,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				return (false, null);
 			}
 
-			var configEditSteps = new PhantomBrigade.Mods.ModConfigEdit()
+			var configEditSteps = new ModConfigEdit()
 			{
 				removed = configEditSerialized.removed,
 				edits = configEditSerialized.edits
@@ -272,7 +289,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			return (true, configEditSteps);
 		}
 
-		private static (bool Ok, PhantomBrigade.Mods.ModConfigEditStep EditStep)
+		private static (bool Ok, ModConfigEditStep EditStep)
 			ParseEditStep(string pathname, string edit)
 		{
 			var parts = edit.Split(new[] { ':' }, 2);
@@ -289,7 +306,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				return (false, null);
 			}
 
-			return (true, new PhantomBrigade.Mods.ModConfigEditStep()
+			return (true, new ModConfigEditStep()
 			{
 				path = editPath,
 				value = editValue,
@@ -299,7 +316,7 @@ namespace EchKode.PBMods.NewGameLoadout
 		private static void ApplyConfigEditSteps(
 			object data,
 			string filename,
-			PhantomBrigade.Mods.ModConfigEdit configEditSteps)
+			ModConfigEdit configEditSteps)
 		{
 			foreach (var editStep in configEditSteps.edits)
 			{
