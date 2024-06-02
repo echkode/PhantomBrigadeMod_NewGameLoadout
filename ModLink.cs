@@ -26,6 +26,8 @@ namespace EchKode.PBMods.NewGameLoadout
 			modID = metadata.id;
 			modPath = metadata.path;
 
+			ModSettings.Load();
+
 			var patchAssembly = typeof(ModLink).Assembly;
 			Debug.LogFormat("Mod {0} is executing OnLoad | Using HarmonyInstance.PatchAll on assembly ({1}) | Directory: {2} | Full path: {3}",
 				metadata.id,

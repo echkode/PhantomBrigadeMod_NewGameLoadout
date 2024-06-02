@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,54 +19,30 @@ namespace EchKode.PBMods.NewGameLoadout
 	[HarmonyPatch]
 	static class NewGameLoadoutPatch
 	{
-		private enum TargetType
-		{
-			File,
-			Directory
-		}
-
-		private const string saveName = "save_internal_quickstart";
-		private static readonly string modConfigOverridesDirectoryName = $"ConfigOverrides/Saves/{saveName}/";
-		private static readonly string modConfigEditsDirectoryName = $"ConfigEdits/Saves/{saveName}/";
-
-		private static bool isNewGameLoading = false;
-
-		private static string modConfigOverridesPath;
-		private static string modConfigEditsPath;
-		private static List<(TargetType TargetType, string FsName, Type ContentType, string FieldName)> targets;
-
 		[HarmonyPatch(typeof(DataManagerSave), nameof(DataManagerSave.LoadData))]
 		[HarmonyPrefix]
 		static void Dms_LoadDataPrefix(DataManagerSave.SaveLocation saveLocation)
 		{
-			isNewGameLoading = saveLocation == DataManagerSave.SaveLocation.Internal && DataManagerSave.saveName == saveName;
+			isNewGameLoading = saveLocation == DataManagerSave.SaveLocation.Internal
+				&& DataManagerSave.saveName == ModSettings.SaveName;
 			if (!isNewGameLoading)
 			{
 				return;
 			}
 
-			if (null != modConfigOverridesPath)
+			if (null != modSaveDecomposedPath)
 			{
 				return;
 			}
 
-			modConfigOverridesPath = ModLink.modPath + modConfigOverridesDirectoryName;
-			modConfigEditsPath = ModLink.modPath + modConfigEditsDirectoryName;
-			targets = new List<(TargetType, string, Type, string)>()
-			{
-				(TargetType.File, "core.yaml", typeof(DataContainerSavedCore), "core"),
-				(TargetType.File, "stats.yaml", typeof(DataContainerSavedStats), "stats"),
-				(TargetType.File, "world.yaml", typeof(DataContainerSavedWorld), "world"),
-				(TargetType.File, "crawler.yaml", typeof(DataContainerSavedCrawler), "crawler"),
-				(TargetType.Directory, "OverworldProvinces", typeof(DataContainerSavedOverworldProvince), "provinces"),
-				(TargetType.Directory, "OverworldEntities", typeof(DataContainerSavedOverworldEntity), "overworldEntities"),
-				(TargetType.File, "combat_setup.yaml", typeof(DataContainerSavedCombatSetup), "combatSetup"),
-				(TargetType.File, "combat.yaml", typeof(DataContainerSavedCombat), "combat"),
-				(TargetType.Directory, "Units", typeof(DataContainerSavedUnit), "units"),
-				(TargetType.Directory, "Pilots", typeof(DataContainerSavedPilot), "pilots"),
-				(TargetType.Directory, "OverworldActions", typeof(DataContainerSavedOverworldAction), "overworldActions"),
-				(TargetType.Directory, "CombatActions", typeof(DataContainerSavedAction), "combatActions"),
-			};
+			modSaveDecomposedPath = DataPathHelper.GetCombinedCleanPath(ModLink.modPath, ModSettings.SaveDecomposedPath);
+			modConfigEditsPath = DataPathHelper.GetCombinedCleanPath(ModLink.modPath, ModSettings.ConfigEditsPath);
+			Debug.LogFormat(
+				"Mod {0} ({1}) configured paths\n  SaveDecomposed: {2}\n  ConfigEdits: {3}",
+				ModLink.modIndex,
+				ModLink.modID,
+				modSaveDecomposedPath,
+				modConfigEditsPath);
 		}
 
 		[HarmonyPatch(typeof(DataManagerSave), nameof(DataManagerSave.LoadData))]
@@ -77,21 +54,28 @@ namespace EchKode.PBMods.NewGameLoadout
 				return;
 			}
 
-			if (!File.Exists(Path.Combine(modConfigOverridesPath, "metadata.yaml")))
+			var filePath = DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, "metadata.yaml");
+			if (!File.Exists(filePath))
 			{
+				return;
+			}
+
+			var containerSavedMetadata = UtilitiesYAML.LoadDataFromFile<DataContainerSavedMetadata>(filePath, appendApplicationPath: false);
+			if (containerSavedMetadata == null)
+			{
+				Debug.LogWarningFormat(
+					"Mod {0} ({1}) Failed to deserialize save metadata | path: {2}",
+					ModLink.modIndex,
+					ModLink.modID,
+					filePath);
 				return;
 			}
 
 			Debug.LogFormat(
-				"Mod {0} ({1}) Using ConfigOverride for save metadata",
+				"Mod {0} ({1}) Replacing save metadata",
 				ModLink.modIndex,
 				ModLink.modID);
 
-			var containerSavedMetadata = UtilitiesYAML.LoadDataFromFile<DataContainerSavedMetadata>(modConfigOverridesPath, "metadata.yaml", appendApplicationPath: false);
-			if (containerSavedMetadata == null)
-			{
-				return;
-			}
 			SaveSerializationHelper.data.metadata = containerSavedMetadata;
 		}
 
@@ -108,7 +92,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			LoadEdits(__instance);
 		}
 
-		private static void LoadOverrides(object __instance)
+		static void LoadOverrides(object __instance)
 		{
 			foreach (var target in targets)
 			{
@@ -123,17 +107,17 @@ namespace EchKode.PBMods.NewGameLoadout
 			}
 		}
 
-		private static void LoadSingle(
+		static void LoadSingle(
 			object inst,
 			(TargetType, string FsName, Type ContentType, string FieldName) target)
 		{
-			if (!File.Exists(Path.Combine(modConfigOverridesPath, target.FsName)))
+			if (!File.Exists(DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, target.FsName)))
 			{
 				return;
 			}
 
 			Debug.LogFormat(
-				"Mod {0} ({1}) Using ConfigOverride for {2}",
+				"Mod {0} ({1}) Replacing SaveDecomposed file {2}",
 				ModLink.modIndex,
 				ModLink.modID,
 				target.FsName);
@@ -143,22 +127,22 @@ namespace EchKode.PBMods.NewGameLoadout
 				"GetContainer",
 				new[] { typeof(string), typeof(string), typeof(bool) },
 				new[] { target.ContentType });
-			var data = method.Invoke(null, new object[] { modConfigOverridesPath, target.FsName, false });
+			var data = method.Invoke(null, new object[] { modSaveDecomposedPath, target.FsName, false });
 			var field = AccessTools.DeclaredField(inst.GetType(), target.FieldName);
 			field.SetValue(inst, data);
 		}
 
-		private static void LoadDecomposed(
+		static void LoadDecomposed(
 			object inst,
 			(TargetType, string FsName, Type ContentType, string FieldName) target)
 		{
-			if (!Directory.Exists(Path.Combine(modConfigOverridesPath, target.FsName)))
+			if (!Directory.Exists(DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, target.FsName)))
 			{
 				return;
 			}
 
 			Debug.LogFormat(
-				"Mod {0} ({1}) LoadDecomposed on: contentType={2}; field={3}; fs={4}",
+				"Mod {0} ({1}) Replacing SaveDecomposed directory {4}\n  LoadDecomposed on: contentType={2}; field={3}",
 				ModLink.modIndex,
 				ModLink.modID,
 				target.ContentType,
@@ -181,7 +165,21 @@ namespace EchKode.PBMods.NewGameLoadout
 				return;
 			}
 
-			var data = method.Invoke(null, new object[] { modConfigOverridesPath, target.FsName });
+			var data = method.Invoke(null, new object[] { modSaveDecomposedPath + "/", target.FsName });
+			if (data is IDictionary dict)
+			{
+				var keys = new List<object>();
+				foreach (var key in dict.Keys)
+				{
+					keys.Add(key);
+				}
+				Debug.LogFormat(
+					"Mod {0} ({1}) keys ({2}): {3}",
+					ModLink.modIndex,
+					ModLink.modID,
+					keys.Count,
+					string.Join(", ", keys));
+			}
 			var field = AccessTools.DeclaredField(inst.GetType(), target.FieldName);
 			if (field == null)
 			{
@@ -197,19 +195,14 @@ namespace EchKode.PBMods.NewGameLoadout
 			field.SetValue(inst, data);
 		}
 
-		private static void LoadEdits(object __instance)
+		static void LoadEdits(object __instance)
 		{
 			foreach (var target in targets)
 			{
 				if (target.TargetType == TargetType.File)
 				{
-					var pathname = Path.Combine(modConfigEditsPath, target.FsName);
-					Debug.LogFormat(
-						"Mod {0} ({1}) Applying ConfigEdits from {2}",
-						ModLink.modIndex,
-						ModLink.modID,
-						target.FsName);
-					var (ok, edits) = LoadConfigEditSteps(pathname);
+					var filePath = DataPathHelper.GetCombinedCleanPath(modConfigEditsPath, target.FsName);
+					var (ok, edits) = LoadConfigEditSteps(filePath);
 					if (!ok)
 					{
 						continue;
@@ -220,7 +213,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				}
 				else if (target.TargetType == TargetType.Directory)
 				{
-					var directoryPath = Path.Combine(modConfigEditsPath, target.FsName);
+					var directoryPath = DataPathHelper.GetCombinedCleanPath(modConfigEditsPath, target.FsName);
 					if (!Directory.Exists(directoryPath))
 					{
 						continue;
@@ -229,17 +222,17 @@ namespace EchKode.PBMods.NewGameLoadout
 					foreach (var pathname in Directory.EnumerateFiles(directoryPath, "*.yaml"))
 					{
 						Debug.LogFormat(
-							"Mod {0} ({1}) Applying ConfigEdits from {2}",
+							"Mod {0} ({1}) Applying ConfigEdits from directory {2}",
 							ModLink.modIndex,
 							ModLink.modID,
 							target.FsName);
-						LoadConfigEditDecomposed(__instance, pathname, target);
+						LoadConfigEditDecomposed(__instance, DataPathHelper.GetCleanPath(pathname), target);
 					}
 				}
 			}
 		}
 
-		private static void LoadConfigEditDecomposed(
+		static void LoadConfigEditDecomposed(
 			object __instance,
 			string pathname,
 			(TargetType, string FsName, Type, string FieldName) target)
@@ -312,13 +305,18 @@ namespace EchKode.PBMods.NewGameLoadout
 			ApplyConfigEditSteps(data, target.FsName + "+" + key, edits);
 		}
 
-		private static (bool, ModConfigEdit)
-			LoadConfigEditSteps(string pathname)
+		static (bool, ModConfigEdit) LoadConfigEditSteps(string pathname)
 		{
 			if (!File.Exists(pathname))
 			{
 				return (false, null);
 			}
+
+			Debug.LogFormat(
+				"Mod {0} ({1}) Applying ConfigEdits from {2}",
+				ModLink.modIndex,
+				ModLink.modID,
+				pathname);
 
 			var configEditSerialized = UtilitiesYAML.ReadFromFile<ModConfigEditSerialized>(pathname, false);
 			if (configEditSerialized == null)
@@ -344,8 +342,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			return (true, configEditSteps);
 		}
 
-		private static (bool Ok, ModConfigEditStep EditStep)
-			ParseEditStep(string pathname, string edit)
+		static (bool Ok, ModConfigEditStep EditStep) ParseEditStep(string pathname, string edit)
 		{
 			var parts = edit.Split(new[] { ':' }, 2);
 			if (parts.Length != 2)
@@ -373,7 +370,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			});
 		}
 
-		private static void ApplyConfigEditSteps(
+		static void ApplyConfigEditSteps(
 			object data,
 			string filename,
 			ModConfigEdit configEditSteps)
@@ -391,5 +388,33 @@ namespace EchKode.PBMods.NewGameLoadout
 				);
 			}
 		}
+
+		enum TargetType
+		{
+			File,
+			Directory
+		}
+
+		static bool isNewGameLoading = false;
+
+		static string modSaveDecomposedPath;
+		static string modConfigEditsPath;
+		static readonly List<(TargetType TargetType, string FsName, Type ContentType, string FieldName)> targets =
+			new List<(TargetType, string, Type, string)>()
+			{
+				(TargetType.File, "core.yaml", typeof(DataContainerSavedCore), "core"),
+				(TargetType.File, "stats.yaml", typeof(DataContainerSavedStats), "stats"),
+				(TargetType.File, "world.yaml", typeof(DataContainerSavedWorld), "world"),
+				(TargetType.File, "crawler.yaml", typeof(DataContainerSavedCrawler), "crawler"),
+				(TargetType.Directory, "OverworldProvinces", typeof(DataContainerSavedOverworldProvince), "provinces"),
+				(TargetType.Directory, "OverworldEntities", typeof(DataContainerSavedOverworldEntity), "overworldEntities"),
+				(TargetType.File, "combat_setup.yaml", typeof(DataContainerSavedCombatSetup), "combatSetup"),
+				(TargetType.File, "combat.yaml", typeof(DataContainerSavedCombat), "combat"),
+				(TargetType.Directory, "Units", typeof(DataContainerSavedUnit), "units"),
+				(TargetType.Directory, "Pilots", typeof(DataContainerSavedPilot), "pilots"),
+				(TargetType.Directory, "OverworldActions", typeof(DataContainerSavedOverworldAction), "overworldActions"),
+				(TargetType.Directory, "CombatActions", typeof(DataContainerSavedAction), "combatActions"),
+				(TargetType.File, "difficulty.yaml", typeof(DataContainerSavedDifficulty), "difficulty"),
+			};
 	}
 }
