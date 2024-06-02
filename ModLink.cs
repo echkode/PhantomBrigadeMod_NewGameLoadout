@@ -22,14 +22,15 @@ namespace EchKode.PBMods.NewGameLoadout
 			// FileLog.Log() should be put in a guard.
 			//Harmony.DEBUG = true;
 
-			modIndex = PBModManager.loadedMods.Count;
 			modID = metadata.id;
+			modIndex = PBModManager.metadataPreloadList.FindIndex(mod => StringComparer.Ordinal.Compare(mod.metadata.id, modID) == 0);
 			modPath = metadata.path;
 
 			ModSettings.Load();
 
 			var patchAssembly = typeof(ModLink).Assembly;
-			Debug.LogFormat("Mod {0} is executing OnLoad | Using HarmonyInstance.PatchAll on assembly ({1}) | Directory: {2} | Full path: {3}",
+			Debug.LogFormat("Mod {0} ({1}) is executing OnLoad | Using HarmonyInstance.PatchAll on assembly ({2}) | Directory: {3} | Full path: {4}",
+				modIndex,
 				metadata.id,
 				patchAssembly.FullName,
 				metadata.directory,
@@ -41,6 +42,15 @@ namespace EchKode.PBMods.NewGameLoadout
 				FileLog.Log($"{new string('=', 20)} Start [{DateTime.Now:u}] {new string('=', 20)}");
 				FileLog.Log("!!! PBMods patches applied");
 			}
+		}
+	}
+
+	partial class ModSettings
+	{
+		internal static void Load()
+		{
+			var settingsPath = System.IO.Path.Combine(ModLink.modPath, "newgameloadout.yaml");
+			Load(ModLink.modID, settingsPath, true);
 		}
 	}
 }

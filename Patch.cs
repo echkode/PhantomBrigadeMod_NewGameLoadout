@@ -23,6 +23,10 @@ namespace EchKode.PBMods.NewGameLoadout
 		[HarmonyPrefix]
 		static void Dms_LoadDataPrefix(DataManagerSave.SaveLocation saveLocation)
 		{
+			if (!ModSettings.Initialized)
+			{
+				return;
+			}
 			isNewGameLoading = saveLocation == DataManagerSave.SaveLocation.Internal
 				&& DataManagerSave.saveName == ModSettings.SaveName;
 			if (!isNewGameLoading)
@@ -30,31 +34,31 @@ namespace EchKode.PBMods.NewGameLoadout
 				return;
 			}
 
-			if (null != modSaveDecomposedPath)
+			if (ModSettings.LogVerbose)
 			{
-				return;
+				Debug.LogFormat(
+					"Mod {0} ({1}) configured paths\n  SaveDecomposed: {2}\n  ConfigEdits: {3}",
+					ModSettings.ModIndex,
+					ModSettings.ModID,
+					ModSettings.SaveDecomposedPath,
+					ModSettings.ConfigEditsPath);
 			}
-
-			modSaveDecomposedPath = DataPathHelper.GetCombinedCleanPath(ModLink.modPath, ModSettings.SaveDecomposedPath);
-			modConfigEditsPath = DataPathHelper.GetCombinedCleanPath(ModLink.modPath, ModSettings.ConfigEditsPath);
-			Debug.LogFormat(
-				"Mod {0} ({1}) configured paths\n  SaveDecomposed: {2}\n  ConfigEdits: {3}",
-				ModLink.modIndex,
-				ModLink.modID,
-				modSaveDecomposedPath,
-				modConfigEditsPath);
 		}
 
 		[HarmonyPatch(typeof(DataManagerSave), nameof(DataManagerSave.LoadData))]
 		[HarmonyPostfix]
 		static void Dms_LoadDataPostfix()
 		{
+			if (!ModSettings.Initialized)
+			{
+				return;
+			}
 			if (!isNewGameLoading)
 			{
 				return;
 			}
 
-			var filePath = DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, "metadata.yaml");
+			var filePath = DataPathHelper.GetCombinedCleanPath(ModSettings.SaveDecomposedPath, "metadata.yaml");
 			if (!File.Exists(filePath))
 			{
 				return;
@@ -65,16 +69,19 @@ namespace EchKode.PBMods.NewGameLoadout
 			{
 				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to deserialize save metadata | path: {2}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					filePath);
 				return;
 			}
 
-			Debug.LogFormat(
-				"Mod {0} ({1}) Replacing save metadata",
-				ModLink.modIndex,
-				ModLink.modID);
+			if (ModSettings.LogVerbose)
+			{
+				Debug.LogFormat(
+					"Mod {0} ({1}) Replacing save metadata",
+					ModSettings.ModIndex,
+					ModSettings.ModID);
+			}
 
 			SaveSerializationHelper.data.metadata = containerSavedMetadata;
 		}
@@ -83,6 +90,10 @@ namespace EchKode.PBMods.NewGameLoadout
 		[HarmonyPrefix]
 		static void LoadCurrent(DataContainerSave __instance)
 		{
+			if (!ModSettings.Initialized)
+			{
+				return;
+			}
 			if (!isNewGameLoading)
 			{
 				return;
@@ -111,23 +122,26 @@ namespace EchKode.PBMods.NewGameLoadout
 			object inst,
 			(TargetType, string FsName, Type ContentType, string FieldName) target)
 		{
-			if (!File.Exists(DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, target.FsName)))
+			if (!File.Exists(DataPathHelper.GetCombinedCleanPath(ModSettings.SaveDecomposedPath, target.FsName)))
 			{
 				return;
 			}
 
-			Debug.LogFormat(
-				"Mod {0} ({1}) Replacing SaveDecomposed file {2}",
-				ModLink.modIndex,
-				ModLink.modID,
-				target.FsName);
+			if (ModSettings.LogVerbose)
+			{
+				Debug.LogFormat(
+					"Mod {0} ({1}) Replacing SaveDecomposed file {2}",
+					ModSettings.ModIndex,
+					ModSettings.ModID,
+					target.FsName);
+			}
 
 			var method = AccessTools.DeclaredMethod(
 				typeof(SaveSerializationHelper),
 				"GetContainer",
 				new[] { typeof(string), typeof(string), typeof(bool) },
 				new[] { target.ContentType });
-			var data = method.Invoke(null, new object[] { modSaveDecomposedPath, target.FsName, false });
+			var data = method.Invoke(null, new object[] { ModSettings.SaveDecomposedPath, target.FsName, false });
 			var field = AccessTools.DeclaredField(inst.GetType(), target.FieldName);
 			field.SetValue(inst, data);
 		}
@@ -136,18 +150,21 @@ namespace EchKode.PBMods.NewGameLoadout
 			object inst,
 			(TargetType, string FsName, Type ContentType, string FieldName) target)
 		{
-			if (!Directory.Exists(DataPathHelper.GetCombinedCleanPath(modSaveDecomposedPath, target.FsName)))
+			if (!Directory.Exists(DataPathHelper.GetCombinedCleanPath(ModSettings.SaveDecomposedPath, target.FsName)))
 			{
 				return;
 			}
 
-			Debug.LogFormat(
-				"Mod {0} ({1}) Replacing SaveDecomposed directory {4}\n  LoadDecomposed on: contentType={2}; field={3}",
-				ModLink.modIndex,
-				ModLink.modID,
-				target.ContentType,
-				target.FieldName,
-				target.FsName);
+			if (ModSettings.LogVerbose)
+			{
+				Debug.LogFormat(
+					"Mod {0} ({1}) Replacing SaveDecomposed directory {4}\n  LoadDecomposed on: contentType={2}; field={3}",
+					ModSettings.ModIndex,
+					ModSettings.ModID,
+					target.ContentType,
+					target.FieldName,
+					target.FsName);
+			}
 
 			var method = AccessTools.DeclaredMethod(
 				typeof(SaveSerializationHelper),
@@ -158,14 +175,14 @@ namespace EchKode.PBMods.NewGameLoadout
 			{
 				Debug.LogWarningFormat(
 					"Mod {0} ({1}) reflection failed: method=GetContainers; targetType={2}; instType={3};",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.ContentType,
 					inst.GetType().Name);
 				return;
 			}
 
-			var data = method.Invoke(null, new object[] { modSaveDecomposedPath + "/", target.FsName });
+			var data = method.Invoke(null, new object[] { ModSettings.SaveDecomposedPath + "/", target.FsName });
 			if (data is IDictionary dict)
 			{
 				var keys = new List<object>();
@@ -173,20 +190,23 @@ namespace EchKode.PBMods.NewGameLoadout
 				{
 					keys.Add(key);
 				}
-				Debug.LogFormat(
-					"Mod {0} ({1}) keys ({2}): {3}",
-					ModLink.modIndex,
-					ModLink.modID,
-					keys.Count,
-					string.Join(", ", keys));
+				if (ModSettings.LogVerbose)
+				{
+					Debug.LogFormat(
+						"Mod {0} ({1}) keys ({2}): {3}",
+						ModSettings.ModIndex,
+						ModSettings.ModID,
+						keys.Count,
+						string.Join(", ", keys));
+				}
 			}
 			var field = AccessTools.DeclaredField(inst.GetType(), target.FieldName);
 			if (field == null)
 			{
 				Debug.LogWarningFormat(
 					"Mod {0} ({1}) reflection failed: field={2}; targetType={3}; instType={4};",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FieldName,
 					target.ContentType,
 					inst.GetType().Name);
@@ -201,7 +221,7 @@ namespace EchKode.PBMods.NewGameLoadout
 			{
 				if (target.TargetType == TargetType.File)
 				{
-					var filePath = DataPathHelper.GetCombinedCleanPath(modConfigEditsPath, target.FsName);
+					var filePath = DataPathHelper.GetCombinedCleanPath(ModSettings.ConfigEditsPath, target.FsName);
 					var (ok, edits) = LoadConfigEditSteps(filePath);
 					if (!ok)
 					{
@@ -213,7 +233,7 @@ namespace EchKode.PBMods.NewGameLoadout
 				}
 				else if (target.TargetType == TargetType.Directory)
 				{
-					var directoryPath = DataPathHelper.GetCombinedCleanPath(modConfigEditsPath, target.FsName);
+					var directoryPath = DataPathHelper.GetCombinedCleanPath(ModSettings.ConfigEditsPath, target.FsName);
 					if (!Directory.Exists(directoryPath))
 					{
 						continue;
@@ -221,11 +241,14 @@ namespace EchKode.PBMods.NewGameLoadout
 
 					foreach (var pathname in Directory.EnumerateFiles(directoryPath, "*.yaml"))
 					{
-						Debug.LogFormat(
-							"Mod {0} ({1}) Applying ConfigEdits from directory {2}",
-							ModLink.modIndex,
-							ModLink.modID,
-							target.FsName);
+						if (ModSettings.LogVerbose)
+						{
+							Debug.LogFormat(
+								"Mod {0} ({1}) Applying ConfigEdits from directory {2}",
+								ModSettings.ModIndex,
+								ModSettings.ModID,
+								target.FsName);
+						}
 						LoadConfigEditDecomposed(__instance, DataPathHelper.GetCleanPath(pathname), target);
 					}
 				}
@@ -239,24 +262,24 @@ namespace EchKode.PBMods.NewGameLoadout
 		{
 			var key = Path.GetFileNameWithoutExtension(pathname).ToLowerInvariant();
 			var map = AccessTools.DeclaredField(__instance.GetType(), target.FieldName).GetValue(__instance);
-			if (null == map)
+			if (map == null)
 			{
-				Debug.LogFormat(
+				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to apply LoadConfigEditDecomposed -- not able to get instance for target field | path: {2} | field: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FsName,
 					target.FieldName);
 				return;
 			}
 			var mt = map.GetType();
 			var test = AccessTools.DeclaredMethod(mt, "ContainsKey");
-			if (null == test)
+			if (test == null)
 			{
-				Debug.LogFormat(
+				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to apply LoadConfigEditDecomposed -- target field doesn't appear to be a map | path: {2} | field: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FsName,
 					target.FieldName);
 				return;
@@ -264,22 +287,22 @@ namespace EchKode.PBMods.NewGameLoadout
 			var found = (bool)test.Invoke(map, new object[] { key });
 			if (!found)
 			{
-				Debug.LogFormat(
+				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to apply LoadConfigEditDecomposed -- key not found on target field | path: {2} | key: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FsName,
 					key);
 				return;
 			}
 
 			var indexer = AccessTools.DeclaredPropertyGetter(mt, "Item");
-			if (null == indexer)
+			if (indexer == null)
 			{
-				Debug.LogFormat(
+				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to apply LoadConfigEditDecomposed -- unable to get item for key | path: {2} | key: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FsName,
 					key);
 				return;
@@ -287,10 +310,10 @@ namespace EchKode.PBMods.NewGameLoadout
 			var data = indexer.Invoke(map, new object[] { key });
 			if (data == null)
 			{
-				Debug.LogFormat(
+				Debug.LogWarningFormat(
 					"Mod {0} ({1}) Failed to apply LoadConfigEditDecomposed -- value for key is null | path: {2} | key: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					target.FsName,
 					key);
 				return;
@@ -312,11 +335,14 @@ namespace EchKode.PBMods.NewGameLoadout
 				return (false, null);
 			}
 
-			Debug.LogFormat(
-				"Mod {0} ({1}) Applying ConfigEdits from {2}",
-				ModLink.modIndex,
-				ModLink.modID,
-				pathname);
+			if (ModSettings.LogVerbose)
+			{
+				Debug.LogFormat(
+					"Mod {0} ({1}) Applying ConfigEdits from {2}",
+					ModSettings.ModIndex,
+					ModSettings.ModID,
+					pathname);
+			}
 
 			var configEditSerialized = UtilitiesYAML.ReadFromFile<ModConfigEditSerialized>(pathname, false);
 			if (configEditSerialized == null)
@@ -344,13 +370,13 @@ namespace EchKode.PBMods.NewGameLoadout
 
 		static (bool Ok, ModConfigEditStep EditStep) ParseEditStep(string pathname, string edit)
 		{
-			var parts = edit.Split(new[] { ':' }, 2);
+			var parts = edit.Split(stepSeparator, 2);
 			if (parts.Length != 2)
 			{
 				Debug.LogWarningFormat(
 					"Mod {0} ({1}) | Edit from {2} has invalid number of separators: {3}",
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					pathname,
 					edit);
 				return (false, null);
@@ -382,8 +408,8 @@ namespace EchKode.PBMods.NewGameLoadout
 					filename,
 					editStep.path,
 					editStep.value,
-					ModLink.modIndex,
-					ModLink.modID,
+					ModSettings.ModIndex,
+					ModSettings.ModID,
 					data.GetType().Name
 				);
 			}
@@ -397,8 +423,7 @@ namespace EchKode.PBMods.NewGameLoadout
 
 		static bool isNewGameLoading = false;
 
-		static string modSaveDecomposedPath;
-		static string modConfigEditsPath;
+		static readonly char[] stepSeparator = { ':' };
 		static readonly List<(TargetType TargetType, string FsName, Type ContentType, string FieldName)> targets =
 			new List<(TargetType, string, Type, string)>()
 			{
