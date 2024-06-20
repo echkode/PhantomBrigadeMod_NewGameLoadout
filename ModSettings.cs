@@ -5,7 +5,6 @@ using System;
 using System.IO;
 
 using PhantomBrigade.Data;
-using PhantomBrigade.Mods;
 
 using UnityEngine;
 
@@ -13,22 +12,11 @@ namespace EchKode.PBMods.NewGameLoadout
 {
 	partial class ModSettings
 	{
-		public static bool Initialized;
-		public static string SaveName;
-		public static string ConfigEditsPath;
-		public static string SaveDecomposedPath;
+		internal static int ModIndex;
+		internal static string ModID;
 
-		public static bool LogVerbose;
-		public static int ModIndex = -1;
-		public static string ModID;
-
-		public static void Load(string modID, string settingsPath, bool logVerbose)
+		public static void Load(string settingsPath)
 		{
-			var modIndex = ModManager.metadataPreloadList.FindIndex(mod => StringComparer.Ordinal.Compare(mod.metadata.id, modID) == 0);
-			if (modIndex == -1)
-			{
-				return;
-			}
 			if (string.IsNullOrWhiteSpace(settingsPath))
 			{
 				return;
@@ -40,16 +28,14 @@ namespace EchKode.PBMods.NewGameLoadout
 				settings = new ModSettings();
 			}
 
-			SaveName = settings.saveName;
-			ConfigEditsPath = MakePathAbsolute(settingsPath, settings.configEditsPath);
-			SaveDecomposedPath = MakePathAbsolute(settingsPath, settings.saveDecomposedPath);
-			Initialized = !string.IsNullOrWhiteSpace(SaveName)
-				&& !string.IsNullOrWhiteSpace(ConfigEditsPath)
-				&& !string.IsNullOrWhiteSpace(SaveDecomposedPath);
+			Patch.SaveName = settings.saveName;
+			Patch.ConfigEditsPath = MakePathAbsolute(settingsPath, settings.configEditsPath);
+			Patch.SaveDecomposedPath = MakePathAbsolute(settingsPath, settings.saveDecomposedPath);
+			Patch.LogVerbose = settings.logVerbose;
 
-			ModIndex = modIndex;
-			ModID = modID;
-			LogVerbose = logVerbose;
+			Patch.Initialized = !string.IsNullOrWhiteSpace(Patch.SaveName)
+				&& !string.IsNullOrWhiteSpace(Patch.ConfigEditsPath)
+				&& !string.IsNullOrWhiteSpace(Patch.SaveDecomposedPath);
 
 			Debug.LogFormat(
 				"Mod {0} ({1}) settings | path: {2}"
@@ -59,9 +45,9 @@ namespace EchKode.PBMods.NewGameLoadout
 				ModIndex,
 				ModID,
 				settingsPath,
-				SaveName,
-				ConfigEditsPath,
-				SaveDecomposedPath);
+				Patch.SaveName,
+				Patch.ConfigEditsPath,
+				Patch.SaveDecomposedPath);
 		}
 
 		static string MakePathAbsolute(string settingsPath, string targetPath)
@@ -98,5 +84,6 @@ namespace EchKode.PBMods.NewGameLoadout
 		public string saveName = "save_internal_quickstart";
 		public string configEditsPath = "ConfigEdits";
 		public string saveDecomposedPath = "SaveDecomposed";
+		public bool logVerbose = false;
 	}
 }

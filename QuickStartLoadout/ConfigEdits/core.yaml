@@ -1,0 +1,5 @@
+removed: false
+edits:
+- 'squadSlots.2: !+'
+- 'squadSlots.2.unitNameInternal: pb_mech_03'
+- 'squadSlots.2.pilotNameInternal: pb_pilot_03'

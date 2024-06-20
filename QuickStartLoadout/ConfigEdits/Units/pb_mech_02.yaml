@@ -1,0 +1,4 @@
+removed: false
+edits:
+- 'parts.equipment_right.preset: wpn_rifle_assault_01_r1'
+- 'parts.equipment_right.systems.internal_main_equipment.blueprint: wpn_main_assault_01'
